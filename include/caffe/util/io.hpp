@@ -3,6 +3,8 @@
 
 #include <unistd.h>
 #include <string>
+#include <boost/filesystem.hpp>
+#include <boost/lambda/bind.hpp>
 
 #include "google/protobuf/message.h"
 
@@ -38,6 +40,18 @@ inline void MakeTempDir(string* temp_dirname) {
       << "Failed to create a temporary directory at: " << *temp_dirname;
   *temp_dirname = temp_dirname_cstr;
   delete[] temp_dirname_cstr;
+}
+
+// code by qiaoan
+inline int CountFilesInDir(string dir_path) {
+  boost::filesystem::path the_path(dir_path);
+  int cnt = 
+    std::count_if( boost::filesystem::directory_iterator(the_path),
+                   boost::filesystem::directory_iterator(),
+    bind( static_cast<bool(*)(const boost::filesystem::path&)>(boost::filesystem::is_regular_file), 
+                   bind( &boost::filesystem::directory_entry::path, 
+                   boost::lambda::_1 ) ) );
+  return cnt;
 }
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto);
@@ -130,6 +144,12 @@ cv::Mat ReadImageToCVMat(const string& filename,
     const bool is_color);
 
 cv::Mat ReadImageToCVMat(const string& filename);
+
+vector<cv::Mat> ReadVideoRandomClipToCVMats(const string&filename, 
+    const int clip_size, const int height, const int width);
+
+vector<cv::Mat> ReadVideoFrames(const string&filename, 
+    const int clip_size, const int height, const int width);
 
 cv::Mat DecodeDatumToCVMatNative(const Datum& datum);
 cv::Mat DecodeDatumToCVMat(const Datum& datum, bool is_color);

@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "hdf5.h"
-
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/data_reader.hpp"
@@ -254,6 +253,46 @@ class ImageDataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual void load_batch(Batch<Dtype>* batch);
 
   vector<std::pair<std::string, int> > lines_;
+  int lines_id_;
+};
+
+// code by qiaoan
+template <typename Dtype>
+class TripleBatch {
+ public:
+  Blob<Dtype> data_, label_, marker_;
+};
+
+template <typename Dtype>
+class VideoDataLayer : public BaseDataLayer<Dtype>, public InternalThread {
+ public:
+  explicit VideoDataLayer(const LayerParameter& param);
+  virtual ~VideoDataLayer();
+  virtual void DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  virtual inline const char* type() const { return "VideoData"; }
+  virtual inline int ExactNumBottomBlobs() const { return 0; }
+  virtual inline int ExactNumTopBlobs() const { return 3; }
+
+ protected:
+
+  virtual void InternalThreadEntry();
+  void load_batch(TripleBatch<Dtype>* batch);
+
+  // Prefetches batches (asynchronously if to GPU memory)
+  static const int PREFETCH_COUNT = 3;
+  Blob<Dtype> transformed_data_;
+  shared_ptr<Caffe::RNG> prefetch_rng_;
+  TripleBatch<Dtype> prefetch_[PREFETCH_COUNT];
+  BlockingQueue<TripleBatch<Dtype>*> prefetch_free_;
+  BlockingQueue<TripleBatch<Dtype>*> prefetch_full_;
+
+  // data
+  virtual void ShuffleData();
+  vector<std::pair<string, int> >  lines_;
   int lines_id_;
 };
 

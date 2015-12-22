@@ -6,6 +6,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/highgui/highgui_c.h>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <boost/format.hpp>
 #include <stdint.h>
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include "caffe/common.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/io.hpp"
+#include "caffe/util/math_functions.hpp"
 
 const int kProtoReadBytesLimit = INT_MAX;  // Max size of 2 GB minus 1 byte.
 
@@ -98,6 +100,57 @@ cv::Mat ReadImageToCVMat(const string& filename,
 cv::Mat ReadImageToCVMat(const string& filename) {
   return ReadImageToCVMat(filename, 0, 0, true);
 }
+
+// code by qiaoan
+vector<cv::Mat> ReadVideoRandomClipToCVMats(const string&dirpath, 
+                 const int clip_size, const int height, const int width) {
+  vector<cv::Mat> clip;
+  const int frame_count = CountFilesInDir(dirpath);
+  CHECK(frame_count > clip_size) << dirpath << " not contain enough frames.";
+  // start_idx is one based index, since ffmpeg output is one based.
+  const int start_idx = caffe_rng_rand() % (frame_count - clip_size) + 1;
+  for (int i = 0; i < clip_size; ++ i) {
+    const int frame_idx = start_idx + i;
+    string filepath = (boost::format("%1%/%2$05d.jpg") % dirpath % frame_idx).str();
+    cv::Mat cv_img_origin = cv::imread(filepath);
+    CHECK(cv_img_origin.data) << "Could not open or find file " << filepath;
+    cv::Mat cv_img;
+    if (height > 0 && width > 0) {
+      cv::resize(cv_img_origin, cv_img, cv::Size(width, height));
+    } else {
+      cv_img = cv_img_origin;
+    }
+    CHECK(cv_img.data) << "Could not resize " << filepath;
+    clip.push_back(cv_img);
+  }
+
+  return clip;
+}
+
+// code by qiaoan
+vector<cv::Mat> ReadVideoFrames(const string&dirpath, 
+    const int clip_size, const int height, const int width) {
+  vector<cv::Mat> clip;
+  const int frame_count = CountFilesInDir(dirpath);
+  CHECK(frame_count >= clip_size) << dirpath << " not contain enough frames.";
+  // start_idx is one based index, since ffmpeg output is one based.
+  for (int i = 0; i < clip_size; ++ i) {
+    string filepath = (boost::format("%1%/%2$05d.jpg") % dirpath % i).str();
+    cv::Mat cv_img_origin = cv::imread(filepath);
+    CHECK(cv_img_origin.data) << "Could not open or find file " << filepath;
+    cv::Mat cv_img;
+    if (height > 0 && width > 0) {
+      cv::resize(cv_img_origin, cv_img, cv::Size(width, height));
+    } else {
+      cv_img = cv_img_origin;
+    }
+    CHECK(cv_img.data) << "Could not resize " << filepath;
+    clip.push_back(cv_img);
+  }
+
+  return clip;
+}
+
 // Do the file extension and encoding match?
 static bool matchExt(const std::string & fn,
                      std::string en) {
