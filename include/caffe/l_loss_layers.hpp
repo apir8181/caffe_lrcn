@@ -38,12 +38,10 @@ private:
   bool normalize_;
   Dtype margin_width_;
   Blob<Dtype> S_frame_; // per frame similarity for @f$ (ti, \hat{t} j) @f$
-  Blob<Dtype> I_frame_; // per frame label sim indicators for @f$ (ti, \hat{t} j) @f$
   Blob<Dtype> N_frame_; // pair frame nearest neighbors indicator for @f$ (ti, \hat{t} j) @f$
   Blob<Dtype> S_video_; // per video similarity for @f$ (i, j) @f$
   Blob<Dtype> I_video_; // per video label sim indicators
   Blob<Dtype> pairwise_loss_;
-  Blob<Dtype> temp_frame_;
 };
 
 template <typename Dtype>

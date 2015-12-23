@@ -39,12 +39,10 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Reshape(
   video_pair_shape.push_back(1);
 
   S_frame_.Reshape(frame_pair_shape);
-  I_frame_.Reshape(frame_pair_shape);
   N_frame_.Reshape(frame_pair_shape);
   S_video_.Reshape(video_pair_shape);
   I_video_.Reshape(video_pair_shape);
   pairwise_loss_.Reshape(video_pair_shape);
-  temp_frame_.Reshape(frame_pair_shape);
 }
 
 template <typename Dtype>

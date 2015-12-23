@@ -2,136 +2,77 @@
 #include "caffe/l_loss_layers.hpp"
 #include "caffe/util/math_functions.hpp"
 
-
 namespace caffe {
 
 template <typename Dtype>
-__global__ void FramePairLabelIndicator(
-    const int clip_size, const int batch_size, const int instance_size,
-    const Dtype *label, Dtype* I) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < instance_size * instance_size) {
-      int row = idx / instance_size;
-      int col = idx % instance_size;
-      int label1 = (int) label[row];
-      int label2 = (int) label[col];
-      I[idx] = label1 == label2 ? 1 : -1;
-  }
-}
-
-template <typename Dtype>
-__global__ void FramePairNearestIndicator(
-    const int clip_size, const int batch_size, const int instance_size,
-    const Dtype* S_frame, Dtype *N) {
-  int id = blockIdx.x * blockDim.x + threadIdx.x;
-  if (id < instance_size * batch_size) {
-    int t = id / batch_size / batch_size;
-    int i = id / batch_size % batch_size;
-    int j = id % batch_size;
-
-    // find max t_hat
-    int row = t * batch_size + i;
-    Dtype max_val = Dtype(-1e10);
-    Dtype t_hat = 0;
-    for (int l = 0; l < clip_size; ++ l) {
-      int col = l * batch_size + j;
-      Dtype val = S_frame[row * instance_size + col];
-      if (val > max_val) {
-        max_val = val;
-        t_hat = l;
-      }
-    }
-    int col = t_hat * batch_size + j;
-    N[row * instance_size + col] = 1;
-  }
-}
-
-template <typename Dtype>
-__global__ void VideoPairLabelIndicator(
-    const int clip_size, const int batch_size, const int instance_size,
-    const Dtype* label, Dtype* S_video) {
+__global__ void kernel_video_label_indicator(const Dtype* label, Dtype* out, const int batch_size) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id < batch_size * batch_size) {
     int i = id / batch_size;
     int j = id % batch_size;
-    S_video[i * batch_size + j] = label[i] == label[j] ? 1 : -1;
+    out[id] = label[i] == label[j] ? 1 : -1;
   }
 }
 
 template <typename Dtype>
-__global__ void VideoPairSimilarity(
-    const int clip_size, const int batch_size, const int instance_size, const int feature_size,
-    const Dtype* N_frame, const Dtype* S_frame, Dtype* S_video) {
+__global__ void kernel_video_similarity(const Dtype *frame_sim, const Dtype* label_indicator, Dtype* out,
+                                        const int clip_size, const int batch_size, const int instance_size) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id < batch_size * batch_size) {
-    int i = id / batch_size;
-    int j = id % batch_size;
-    int video_idx = i * batch_size + j;
-
+    int i = id / batch_size, j = id % batch_size;
+    Dtype sim = 0;
+    // for each timestamp find nearest neighbor
     for (int t = 0; t < clip_size; ++ t) {
+      Dtype it_jth_max = -1e10, jt_ith_max = -1e10;
       for (int t_hat = 0; t_hat < clip_size; ++ t_hat) {
-        int row = t * batch_size + i;
-        int col = t_hat * batch_size + j;
-        int idx = row * instance_size + col;
-        int inv_idx = col * instance_size + row;
-        S_video[video_idx] += N_frame[idx] * S_frame[idx] / clip_size;
-        S_video[video_idx] += N_frame[inv_idx] * S_frame[inv_idx] / clip_size;
+        int row_1 = t * batch_size + i, col_1 = t_hat * batch_size + j;
+        int row_2 = t * batch_size + j, col_2 = t_hat * batch_size + i;
+        int idx_1 = row_1 * instance_size + col_1, idx_2 = row_2 * instance_size + col_2;
+        it_jth_max = fmax(it_jth_max, frame_sim[idx_1]);
+        jt_ith_max = fmax(jt_ith_max, frame_sim[idx_2]);
       }
+      sim += (it_jth_max + jt_ith_max) / clip_size;
     }
+    out[id] = sim;
   }
 }
 
 template <typename Dtype>
-__global__ void PairwiseLoss(const int count, const Dtype margin_width,
-                             const Dtype* S_video, const Dtype* I_video, Dtype* out) {
-  int id = blockIdx.x * blockDim.x + threadIdx.x;
-  if (id < count) {
-    Dtype pre_loss =  margin_width - I_video[id] * S_video[id];
-    out[id] = pre_loss > 0 ? pre_loss : 0;
+__global__ void kernel_pairwise_loss(const Dtype* video_sim, const Dtype* label_indicator, Dtype* out,
+                                     const int count, const Dtype margin_width) {
+  CUDA_KERNEL_LOOP(i, count) {
+    out[i] = fmax(0, margin_width - label_indicator[i] * video_sim[i]);
   }
-}    
+}
 
 template <typename Dtype>
 void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  const Dtype* data = bottom[0]->gpu_data();
-  const Dtype* label = bottom[1]->gpu_data();
+  const Dtype* bottom_data = bottom[0]->gpu_data();
+  const Dtype* bottom_label = bottom[1]->gpu_data();
 
   // calculate per frame pair similarity
   Dtype* frame_sim = S_frame_.mutable_gpu_data();
   caffe_gpu_gemm(CblasNoTrans, CblasTrans, 
                  instance_size_, instance_size_, feature_size_,
-                 Dtype(1), data, data, Dtype(0), frame_sim);
-
-  // calculate frame label indicator
-  Dtype* indicator_frame = I_frame_.mutable_gpu_data();
-  caffe_gpu_set(I_frame_.count(), Dtype(0), indicator_frame);
-  FramePairLabelIndicator<Dtype><<<CAFFE_GET_BLOCKS(instance_size_ * instance_size_), 
-    CAFFE_CUDA_NUM_THREADS>>>(clip_size_, batch_size_, instance_size_, label, indicator_frame);
-
-  // calculate nearest frame
-  Dtype* nn_indicator = N_frame_.mutable_gpu_data();
-  caffe_gpu_set(N_frame_.count(), Dtype(0), nn_indicator);
-  FramePairNearestIndicator<Dtype><<<CAFFE_GET_BLOCKS(instance_size_ * batch_size_),
-    CAFFE_CUDA_NUM_THREADS>>>(clip_size_, batch_size_, instance_size_, frame_sim, nn_indicator);
-  
-  // calculate video pair similarity
-  Dtype* video_sim = S_video_.mutable_gpu_data();
-  caffe_gpu_set(S_video_.count(), Dtype(0), video_sim);
-  VideoPairSimilarity<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
-    CAFFE_CUDA_NUM_THREADS>>>(clip_size_, batch_size_, instance_size_, feature_size_, nn_indicator, frame_sim, video_sim);
+                 Dtype(1), bottom_data, bottom_data, Dtype(0), frame_sim);
 
   // calculate video label indicator
   Dtype* indicator_video = I_video_.mutable_gpu_data();
-  caffe_gpu_set(I_video_.count(), Dtype(0), indicator_video);
-  VideoPairLabelIndicator<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
-    CAFFE_CUDA_NUM_THREADS>>>(clip_size_, batch_size_, instance_size_, label, indicator_video);
+  kernel_video_label_indicator<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
+    CAFFE_CUDA_NUM_THREADS>>>(bottom_label, indicator_video, batch_size_);
+
+  // calculate video pair similarity
+  Dtype* video_sim = S_video_.mutable_gpu_data();
+  kernel_video_similarity<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
+    CAFFE_CUDA_NUM_THREADS>>>(frame_sim, indicator_video, video_sim, 
+                              clip_size_, batch_size_, instance_size_);
 
   // calculate pairwise loss
   Dtype* pairwise_loss = pairwise_loss_.mutable_gpu_data();
-  caffe_gpu_set<Dtype>(pairwise_loss_.count(), Dtype(0), pairwise_loss);
-  PairwiseLoss<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
-    CAFFE_CUDA_NUM_THREADS>>>(pairwise_loss_.count(), margin_width_, video_sim, indicator_video, pairwise_loss);
+  kernel_pairwise_loss<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
+    CAFFE_CUDA_NUM_THREADS>>>(video_sim, indicator_video, pairwise_loss, 
+                              pairwise_loss_.count(), margin_width_);
 
   // sum pairwise loss
   Dtype loss;
@@ -143,16 +84,30 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_gpu(
 }
 
 template <typename Dtype>
-__global__ void FramePairBPScaleMatrix(
-  const int clip_size, const int batch_size, const int instance_size, const int feature_size,
-  const Dtype* nn_indicator, const Dtype* frame_indicator, const Dtype* pairwise_loss, 
-  Dtype* out) {
+__global__ void kernel_nearest(const Dtype* frame_sim, const Dtype* label_indicator,
+                               const Dtype* pairwise_loss, const Dtype* bottom_data, 
+                               Dtype* out,
+                               const int clip_size, const int batch_size, const int instance_size) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
-  if (id < instance_size * instance_size) {
-    int row = id / instance_size, col = id % instance_size;
-    int i = row % batch_size, j = col % batch_size;
-    out[id] = pairwise_loss[i * batch_size + j] > 0 ? 
-      -frame_indicator[id] * nn_indicator[id] / clip_size : 0;
+  if (id < clip_size * batch_size) {
+    int t = id / batch_size, i = id % batch_size;
+    for (int j = 0; j < batch_size; ++ j) {
+      // find nearest neighbor
+      Dtype it_jth_max = 1e-10, it_jth_idx = 0;
+      for (int t_hat = 0; t_hat < clip_size; ++ t_hat) {
+        int row = t * batch_size + i, col = t_hat * batch_size + j;
+        int idx = row * instance_size + col;
+        if (it_jth_max < frame_sim[idx]) {
+          it_jth_max = frame_sim[idx];
+          it_jth_idx = t_hat;
+        }
+      }
+
+      Dtype indicator = (pairwise_loss[i * batch_size + j] > 0);
+      Dtype weight = indicator * label_indicator[i * batch_size + j] / clip_size;
+      int row = t * batch_size + i, col = it_jth_idx * batch_size + j;
+      out[row * instance_size + col] = -weight;
+    }
   }
 }
 
@@ -165,23 +120,30 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Backward_gpu(
                << " Layer cannot backpropagate to label inputs.";
   }
   if (propagate_down[0]) {
-    Dtype* temp = temp_frame_.mutable_gpu_data();
-    FramePairBPScaleMatrix<Dtype><<<CAFFE_GET_BLOCKS(instance_size_ * instance_size_),
-      CAFFE_CUDA_NUM_THREADS>>>(clip_size_, batch_size_, instance_size_, feature_size_,
-                                N_frame_.gpu_data(), I_frame_.gpu_data(), 
-                                pairwise_loss_.gpu_data(), temp);
+    const Dtype* frame_sim = S_frame_.gpu_data();
+    const Dtype* label_indicator = I_video_.gpu_data();
+    const Dtype* pairwise_loss = pairwise_loss_.gpu_data();
+    const Dtype* bottom_data = bottom[0]->gpu_data();
+    Dtype* nn_frame = N_frame_.mutable_gpu_data();
+    Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
 
-    const Dtype* data = bottom[0]->gpu_data();
-    Dtype* diff = bottom[0]->mutable_gpu_diff();
+    // get nearest neighbor
+    caffe_gpu_set<Dtype>(N_frame_.count(), Dtype(0), nn_frame);    
+    kernel_nearest<Dtype><<<CAFFE_GET_BLOCKS(clip_size_ * batch_size_),
+      CAFFE_CUDA_NUM_THREADS>>>(frame_sim, label_indicator,
+                                pairwise_loss, bottom_data, 
+                                nn_frame,
+                                clip_size_, batch_size_, instance_size_);
+
     caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
                           instance_size_, feature_size_, instance_size_,
-                          Dtype(1), temp, data, Dtype(0), diff);
+                          Dtype(1), nn_frame, bottom_data, Dtype(0), bottom_diff);
     caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
                           instance_size_, feature_size_, instance_size_,
-                          Dtype(1), temp, data, Dtype(1), diff);
+                          Dtype(1), nn_frame, bottom_data, Dtype(1), bottom_diff);
     if (normalize_) {
       Dtype scale_factor = batch_size_ * batch_size_;
-      caffe_gpu_scal<Dtype>(bottom[0]->count(), 1.0 / scale_factor, diff);
+      caffe_gpu_scal<Dtype>(bottom[0]->count(), 1.0 / scale_factor, bottom_diff);
     }
   }
 }
