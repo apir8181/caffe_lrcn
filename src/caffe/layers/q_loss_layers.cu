@@ -48,7 +48,7 @@ void QLossLayer<Dtype>::Backward_gpu(
   const vector<Blob<Dtype>*>& bottom) {
   int bottom_data_count = bottom[0]->count();
   const Dtype* bottom_data = bottom[0]->gpu_data();
-  Dtype* bottom_diff = bottom[0]->mutable_gpu_data();
+  Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
   kernel_backprop<Dtype><<<CAFFE_GET_BLOCKS(bottom_data_count),
     CAFFE_CUDA_NUM_THREADS>>>(bottom_data_count, bottom_data, bottom_diff);
   if (normalize_) {

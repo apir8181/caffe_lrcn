@@ -13,10 +13,6 @@ __global__ void FramePairLabelIndicator(
   if (idx < instance_size * instance_size) {
       int row = idx / instance_size;
       int col = idx % instance_size;
-      int i = row % batch_size;
-      int j = col % batch_size;
-      if (i == j) return;
-
       int label1 = (int) label[row];
       int label2 = (int) label[col];
       I[idx] = label1 == label2 ? 1 : -1;
@@ -32,7 +28,6 @@ __global__ void FramePairNearestIndicator(
     int t = id / batch_size / batch_size;
     int i = id / batch_size % batch_size;
     int j = id % batch_size;
-    if (i == j) return;
 
     // find max t_hat
     int row = t * batch_size + i;
@@ -59,7 +54,6 @@ __global__ void VideoPairLabelIndicator(
   if (id < batch_size * batch_size) {
     int i = id / batch_size;
     int j = id % batch_size;
-    if (i == j) return;
     S_video[i * batch_size + j] = label[i] == label[j] ? 1 : -1;
   }
 }
@@ -73,7 +67,6 @@ __global__ void VideoPairSimilarity(
     int i = id / batch_size;
     int j = id % batch_size;
     int video_idx = i * batch_size + j;
-    if (i == j) return;
 
     for (int t = 0; t < clip_size; ++ t) {
       for (int t_hat = 0; t_hat < clip_size; ++ t_hat) {
@@ -93,7 +86,7 @@ __global__ void PairwiseLoss(const int count, const Dtype margin_width,
                              const Dtype* S_video, const Dtype* I_video, Dtype* out) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id < count) {
-    Dtype pre_loss = I_video[id] * (margin_width - S_video[id]);
+    Dtype pre_loss =  margin_width - I_video[id] * S_video[id];
     out[id] = pre_loss > 0 ? pre_loss : 0;
   }
 }    
@@ -144,26 +137,9 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_gpu(
   Dtype loss;
   caffe_gpu_asum<Dtype>(pairwise_loss_.count(), pairwise_loss, &loss);
   if (normalize_) {
-    loss /= batch_size_ * (batch_size_ - 1);
+    loss /= batch_size_ * batch_size_;
   }
   top[0]->mutable_cpu_data()[0] = loss;
-
-  /*
-  for (int i = 0; i < I_video_.count(); ++ i) {
-    LOG(INFO) << "video label similarity "
-              << i << " " << I_video_.cpu_data()[i];
-  }  
-
-  for (int i = 0; i < S_video_.count(); ++ i) {
-    LOG(INFO) << "video similarity "
-              << i << " " << S_video_.cpu_data()[i];
-  }  
-
-  for (int i = 0; i < pairwise_loss_.count(); ++ i) {
-    LOG(INFO) << "Pairwise loss "
-              << i << " " << pairwise_loss_.cpu_data()[i];
-  }
-  */
 }
 
 template <typename Dtype>
@@ -204,7 +180,7 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Backward_gpu(
                           instance_size_, feature_size_, instance_size_,
                           Dtype(1), temp, data, Dtype(1), diff);
     if (normalize_) {
-      Dtype scale_factor = batch_size_ * (batch_size_ - 1);
+      Dtype scale_factor = batch_size_ * batch_size_;
       caffe_gpu_scal<Dtype>(bottom[0]->count(), 1.0 / scale_factor, diff);
     }
   }

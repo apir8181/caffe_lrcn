@@ -4,7 +4,7 @@
 namespace caffe {
 
 template <typename Dtype>
-void MaxMarginMaxSimVideoLossLayer<Dtype>::LayerSetUp(
+void MaxMarginSimpleSimVideoLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   LossLayer<Dtype>::LayerSetUp(bottom, top);
 
@@ -13,7 +13,7 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::LayerSetUp(
   CHECK_EQ(bottom[0]->shape(1), bottom[1]->shape(1))
     << "data & data label should have equal shape.";
 
-  margin_width_ = this->layer_param_.max_margin_max_sim_video_loss_param().margin_width();
+  margin_width_ = this->layer_param_.l_loss_param().margin_width();
   clip_size_ = bottom[0]->shape(0);
   batch_size_ = bottom[0]->shape(1);
   feature_size_ = bottom[0]->shape(2);
@@ -22,7 +22,7 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::LayerSetUp(
 }
 
 template <typename Dtype>
-void MaxMarginMaxSimVideoLossLayer<Dtype>::Reshape(
+void MaxMarginSimpleSimVideoLossLayer<Dtype>::Reshape(
   const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   LossLayer<Dtype>::Reshape(bottom, top);
 
@@ -38,32 +38,28 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Reshape(
   video_pair_shape.push_back(1);
   video_pair_shape.push_back(1);
 
-  S_frame_.Reshape(frame_pair_shape);
-  I_frame_.Reshape(frame_pair_shape);
-  N_frame_.Reshape(frame_pair_shape);
   S_video_.Reshape(video_pair_shape);
   I_video_.Reshape(video_pair_shape);
   pairwise_loss_.Reshape(video_pair_shape);
-  temp_frame_.Reshape(frame_pair_shape);
 }
 
 template <typename Dtype>
-void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_cpu(
+void MaxMarginSimpleSimVideoLossLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   NOT_IMPLEMENTED;
 }
 
 template <typename Dtype>
-void MaxMarginMaxSimVideoLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
+void MaxMarginSimpleSimVideoLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
   NOT_IMPLEMENTED;
 }
 
 #ifdef CPU_ONLY
-STUB_GPU(MaxMarginMaxSimVideoLossLayer);
+STUB_GPU(MaxMarginSimpleSimVideoLossLayer);
 #endif
 
-INSTANTIATE_CLASS(MaxMarginMaxSimVideoLossLayer);
-REGISTER_LAYER_CLASS(MaxMarginMaxSimVideoLoss);
+INSTANTIATE_CLASS(MaxMarginSimpleSimVideoLossLayer);
+REGISTER_LAYER_CLASS(MaxMarginSimpleSimVideoLoss);
 
 }

@@ -57,11 +57,11 @@ layer {
   bottom: "data"
   top: "conv1"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   convolution_param {
@@ -112,11 +112,11 @@ layer {
   bottom: "norm1"
   top: "conv2"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   convolution_param {
@@ -168,11 +168,11 @@ layer {
   bottom: "norm2"
   top: "conv3"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   convolution_param {
@@ -201,11 +201,11 @@ layer {
   bottom: "conv3"
   top: "conv4"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   convolution_param {
@@ -235,11 +235,11 @@ layer {
   bottom: "conv4"
   top: "conv5"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   convolution_param {
@@ -280,11 +280,11 @@ layer {
   bottom: "pool5"
   top: "fc6"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   inner_product_param {
@@ -320,11 +320,11 @@ layer {
   bottom: "fc6"
   top: "fc7"
   param {
-    lr_mult: 1
+    lr_mult: 0.1
     decay_mult: 1
   }
   param {
-    lr_mult: 2
+    lr_mult: 0.2
     decay_mult: 0
   }
   inner_product_param {
@@ -354,18 +354,42 @@ layer {
     dropout_ratio: 0.5
   }
 }
-
+layer {
+  name: "fc8"
+  type: "InnerProduct"
+  bottom: "fc7"
+  top: "fc8"
+  param {
+    lr_mult: 0.1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 0.2
+    decay_mult: 0
+  }
+  inner_product_param {
+    num_output: 1000
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
 # Reshape data(TRAIN) Start
 layer{
   name: "lstm/data"
   type: "Reshape"
-  bottom: "fc7"
+  bottom: "fc8"
   top: "lstm/data"
   reshape_param{
     shape{
       dim: 30
       dim: 30
-      dim: 4096
+      dim: 1000
     }
   }
   include: { phase: TRAIN }
@@ -402,13 +426,13 @@ layer{
 layer{
   name: "lstm/data"
   type: "Reshape"
-  bottom: "fc7"
+  bottom: "fc8"
   top: "lstm/data"
   reshape_param{
     shape{
       dim: 30
       dim: 1
-      dim: 4096
+      dim: 1000
     }
   }
   include: { phase: TEST }
@@ -479,11 +503,11 @@ layer {
   bottom: "lstm/data"
   top: "hash/raw"
   param {
-    lr_mult: 10
+    lr_mult: 1
     decay_mult: 1
   }
   param {
-    lr_mult: 20
+    lr_mult: 2
     decay_mult: 0
   }
   inner_product_param {
@@ -500,43 +524,43 @@ layer {
   }
 }
 
-# layer {
-#   name: "hash/tanh"
-#   type: "TanH"
-#   bottom: "hash/raw"
-#   top: "hash/tanh"
-# }
+layer {
+  name: "hash/tanh"
+  type: "TanH"
+  bottom: "hash/raw"
+  top: "hash/tanh"
+}
 
-# layer {
-#   name: "hash/split"
-#   type: "Split"
-#   bottom: "hash/tanh"
-#   top: "hash/l-loss"
-#   top: "hash/q-loss"
-# }
+layer {
+  name: "hash/split"
+  type: "Split"
+  bottom: "hash/tanh"
+  top: "hash/l-loss"
+  top: "hash/q-loss"
+}
 
-# layer {
-#   name: "distance-loss"
-#   type: "MaxMarginMaxSimVideoLoss"
-#   bottom: "hash/l-loss"
-#   bottom: "lstm/label"
-#   top: "L-loss"
-#   max_margin_max_sim_video_loss_param {
-#     margin_width: 1
-#   }
-# }
+layer {
+  name: "distance-loss"
+  type: "MaxMarginMaxSimVideoLoss"
+  bottom: "hash/l-loss"
+  bottom: "lstm/label"
+  top: "L-loss"
+  l_loss_param {
+    margin_width: 1
+  }
+}
 
 layer {
   name: "quantization loss"
   type: "QLoss"
-  bottom: "hash/raw"
+  bottom: "hash/q-loss"
   top: "Q-loss"
   q_loss_param {
     axis: 2
-    scale: 1
+    scale: 0
   }
   loss_param {
-    normalize: false
+    normalize: true
   }
 }
 
@@ -547,8 +571,8 @@ layer {
   bottom: "lstm/marker"
 }
 
-layer {
-  name: "silence"
-  type: "Silence"
-  bottom: "lstm/label"
-}
+# layer {
+#   name: "silence"
+#   type: "Silence"
+#   bottom: "lstm/label"
+# }
