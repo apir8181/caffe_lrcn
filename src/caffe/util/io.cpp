@@ -151,6 +151,31 @@ vector<cv::Mat> ReadVideoFrames(const string&dirpath,
   return clip;
 }
 
+// code by qiaoan
+vector<cv::Mat> ReadVideoClipsWithOffset(const string&dirpath, 
+                                         const int offset, const int clip_size, 
+                                         const int height, const int width) {
+  vector<cv::Mat> clip;
+  const int frame_count = CountFilesInDir(dirpath);
+  CHECK(frame_count >= offset + clip_size - 1) << dirpath << " not contain enough frames.";
+  // start_idx is one based index, since ffmpeg output is one based.
+  for (int i = offset; i < offset + clip_size; ++ i) {
+    string filepath = (boost::format("%1%/%2$05d.jpg") % dirpath % i).str();
+    cv::Mat cv_img_origin = cv::imread(filepath);
+    CHECK(cv_img_origin.data) << "Could not open or find file " << filepath;
+    cv::Mat cv_img;
+    if (height > 0 && width > 0) {
+      cv::resize(cv_img_origin, cv_img, cv::Size(width, height));
+    } else {
+      cv_img = cv_img_origin;
+    }
+    CHECK(cv_img.data) << "Could not resize " << filepath;
+    clip.push_back(cv_img);
+  }
+
+  return clip;
+}
+
 // Do the file extension and encoding match?
 static bool matchExt(const std::string & fn,
                      std::string en) {

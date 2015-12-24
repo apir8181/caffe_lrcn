@@ -16,10 +16,10 @@ layer {
     mirror: true
   }
   video_data_param {
-    source: "./ucf_trainlist01_new.txt"
-    root_folder: "/home/qiaoan/caffe/lrcn_video_hash/UCF101_30/"
-    clip_size: 30
-    batch_size: 30
+    source: "./CCV_preprocess/CCV_trainlist_offset.txt"
+    root_folder: "/home/qiaoan/caffe/lrcn_video_hash/CCV/"
+    clip_size: 16
+    batch_size: 64
     shuffle: true
     new_height: 256
     new_width: 256 
@@ -42,9 +42,9 @@ layer {
     mirror: true
   }
   video_data_param {
-    source: "./ucf_testlist01.txt"
-    root_folder: "/home/qiaoan/caffe/lrcn_video_hash/UCF101_30/"
-    clip_size: 30
+    source: "./CCV_preprocess/CCV_trainlist_offset.txt"
+    root_folder: "/home/qiaoan/caffe/lrcn_video_hash/CCV/"
+    clip_size: 16
     batch_size: 1
     shuffle: true
     new_height: 256
@@ -387,8 +387,8 @@ layer{
   top: "lstm/data"
   reshape_param{
     shape{
-      dim: 30
-      dim: 30
+      dim: 16
+      dim: 64
       dim: 1000
     }
   }
@@ -401,8 +401,8 @@ layer{
   top: "lstm/label"
   reshape_param{
     shape{
-      dim: 30
-      dim: 30
+      dim: 16
+      dim: 64
     }
   }
   include: { phase: TRAIN }
@@ -414,8 +414,8 @@ layer{
   top: "lstm/marker"
   reshape_param{
     shape{
-      dim: 30
-      dim: 30
+      dim: 16
+      dim: 64
     }
   }
   include: { phase: TRAIN }
@@ -430,7 +430,7 @@ layer{
   top: "lstm/data"
   reshape_param{
     shape{
-      dim: 30
+      dim: 16
       dim: 1
       dim: 1000
     }
@@ -444,7 +444,7 @@ layer{
   top: "lstm/label"
   reshape_param{
     shape{
-      dim: 30
+      dim: 16
       dim: 1
     }
   }
@@ -457,7 +457,7 @@ layer{
   top: "lstm/marker"
   reshape_param{
     shape{
-      dim: 30
+      dim: 16
       dim: 1
     }
   }
@@ -557,7 +557,7 @@ layer {
   top: "Q-loss"
   q_loss_param {
     axis: 2
-    scale: 0
+    scale: 1
   }
   loss_param {
     normalize: true

@@ -292,7 +292,9 @@ class VideoDataLayer : public BaseDataLayer<Dtype>, public InternalThread {
 
   // data
   virtual void ShuffleData();
-  vector<std::pair<string, int> >  lines_;
+  vector<string> names_;
+  vector<int> labels_;
+  vector<int> offsets_;
   int lines_id_;
 };
 

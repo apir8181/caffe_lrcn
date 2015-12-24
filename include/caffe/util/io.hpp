@@ -151,6 +151,10 @@ vector<cv::Mat> ReadVideoRandomClipToCVMats(const string&filename,
 vector<cv::Mat> ReadVideoFrames(const string&filename, 
     const int clip_size, const int height, const int width);
 
+vector<cv::Mat> ReadVideoClipsWithOffset(const string&dirpath, 
+    const int offset, const int clip_size, const int height, const int width);
+
+
 cv::Mat DecodeDatumToCVMatNative(const Datum& datum);
 cv::Mat DecodeDatumToCVMat(const Datum& datum, bool is_color);
 

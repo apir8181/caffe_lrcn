@@ -10,7 +10,10 @@ __global__ void kernel_video_label_indicator(const Dtype* label, Dtype* out, con
   if (id < batch_size * batch_size) {
     int i = id / batch_size;
     int j = id % batch_size;
-    out[id] = label[i] == label[j] ? 1 : -1;
+    int label1 = (int) label[i];
+    int label2 = (int) label[j];
+    bool has_common = (label1 & label2) > 0;
+    out[id] = has_common ? 1 : -1;
   }
 }
 

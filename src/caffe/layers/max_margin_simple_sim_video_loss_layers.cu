@@ -27,7 +27,9 @@ __global__ void VideoLabelIndicator(const Dtype* label, Dtype* out, const int ba
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id < batch_size * batch_size) {
     int i = id / batch_size, j = id % batch_size;
-    out[id] = label[i] == label[j] ? 1 : -1;
+    int label1 = (int) label[i], label2 = (int) label[j];
+    bool has_common = (label1 & label2) > 0;
+    out[id] = has_common ? 1 : -1;
   }
 }
 

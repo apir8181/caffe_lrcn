@@ -40,6 +40,10 @@ void VideoDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   const int batch_size = this->layer_param_.video_data_param().batch_size();
   string root_folder = this->layer_param_.video_data_param().root_folder();
 
+  names_.clear();
+  labels_.clear();
+  offsets_.clear();
+
   CHECK((new_height == 0 && new_width == 0) ||
       (new_height > 0 && new_width > 0)) << "Current implementation requires "
       "new_height and new_width to be set at the same time.";
@@ -48,9 +52,11 @@ void VideoDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   LOG(INFO) << "Opening file " << source;
   std::ifstream infile(source.c_str());
   string filename;
-  int label;
-  while (infile >> filename >> label) {
-    lines_.push_back(std::make_pair(filename, label));
+  int label, offset;
+  while (infile >> filename >> label >> offset) {
+    names_.push_back(filename);
+    labels_.push_back(label);
+    offsets_.push_back(offset);
   }
 
   if (this->layer_param_.video_data_param().shuffle()) {
@@ -58,12 +64,11 @@ void VideoDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     LOG(INFO) << "Shuffling data";
     ShuffleData();
   }
-  LOG(INFO) << "A total of " << lines_.size() << " videos.";
+  LOG(INFO) << "A total of " << names_.size() << " videos.";
 
   lines_id_ = 0;
   // Read an video, and use it to initialize the top blob.
-  vector<cv::Mat> clip = ReadVideoFrames(
-    root_folder + lines_[lines_id_].first, clip_size, new_height, new_width);
+  vector<cv::Mat> clip = ReadVideoClipsWithOffset(root_folder + names_[0], offsets_[0], clip_size, new_height, new_width);
   // Use data_transformer to infer the expected blob shape from a cv_image.
   vector<int> top_shape = this->data_transformer_->InferBlobShape(clip[0]);
   this->transformed_data_.Reshape(top_shape);
@@ -126,10 +131,19 @@ void VideoDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void VideoDataLayer<Dtype>::ShuffleData() {
   const unsigned int seed = caffe_rng_rand();
+  // shuffle names
+  caffe::rng_t* prefetch_rng;
   prefetch_rng_.reset(new Caffe::RNG(seed));
-  caffe::rng_t* prefetch_rng =
-      static_cast<caffe::rng_t*>(prefetch_rng_->generator());
-  shuffle(lines_.begin(), lines_.end(), prefetch_rng);
+  prefetch_rng = static_cast<caffe::rng_t*>(prefetch_rng_->generator());
+  shuffle(names_.begin(), names_.end(), prefetch_rng);
+  // shuffle labels
+  prefetch_rng_.reset(new Caffe::RNG(seed));
+  prefetch_rng = static_cast<caffe::rng_t*>(prefetch_rng_->generator());
+  shuffle(labels_.begin(), labels_.end(), prefetch_rng);
+  // shuffle offsets
+  prefetch_rng_.reset(new Caffe::RNG(seed));
+  prefetch_rng = static_cast<caffe::rng_t*>(prefetch_rng_->generator());
+  shuffle(offsets_.begin(), offsets_.end(), prefetch_rng);
 }
 
 template <typename Dtype>
@@ -204,8 +218,8 @@ void VideoDataLayer<Dtype>::load_batch(TripleBatch<Dtype>* batch) {
   string root_folder = this->layer_param_.video_data_param().root_folder();
   // Reshape according to the first video of each batch
   // on single input batches allows for inputs of varying dimension.
-  vector<cv::Mat> clip = ReadVideoFrames(
-    root_folder + lines_[lines_id_].first, clip_size, new_height, new_width);
+  vector<cv::Mat> clip = ReadVideoClipsWithOffset(
+    root_folder + names_[lines_id_], offsets_[lines_id_], clip_size, new_height, new_width);
   // Use data_transformer to infer the expected blob shape from a cv_img.
   vector<int> top_shape = this->data_transformer_->InferBlobShape(clip[0]);
   this->transformed_data_.Reshape(top_shape);
@@ -217,14 +231,12 @@ void VideoDataLayer<Dtype>::load_batch(TripleBatch<Dtype>* batch) {
   Dtype* prefetch_label = batch->label_.mutable_cpu_data();
   Dtype* prefetch_marker = batch->marker_.mutable_cpu_data();
 
-  // datum scales
-  const int lines_size = lines_.size();
   for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
     // get a blob
     timer.Start();
-    CHECK_GT(lines_size, lines_id_);
-    vector<cv::Mat> clip = ReadVideoFrames(
-      root_folder + lines_[lines_id_].first, clip_size, new_height, new_width);
+    CHECK_LT(lines_id_, names_.size());
+    vector<cv::Mat> clip = ReadVideoClipsWithOffset(
+      root_folder + names_[lines_id_], offsets_[lines_id_], clip_size, new_height, new_width);
     read_time += timer.MicroSeconds();
     timer.Start();
     // Apply transformations to the each frame in video
@@ -234,12 +246,12 @@ void VideoDataLayer<Dtype>::load_batch(TripleBatch<Dtype>* batch) {
       this->transformed_data_.set_cpu_data(prefetch_data + offset);
       this->data_transformer_->Transform(clip[frame_id], &(this->transformed_data_));
       trans_time += timer.MicroSeconds();
-      prefetch_label[item_id] = lines_[lines_id_].second;
+      prefetch_label[item_id] = labels_[lines_id_];
       prefetch_marker[item_id] = frame_id == 0 ? 0 : 1;
     }
     // go to the next iter
     lines_id_++;
-    if (lines_id_ >= lines_size) {
+    if (lines_id_ >= names_.size()) {
       // We have reached the end. Restart from the first.
       DLOG(INFO) << "Restarting data prefetching from start.";
       lines_id_ = 0;
