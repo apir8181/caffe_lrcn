@@ -19,6 +19,13 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::LayerSetUp(
   feature_size_ = bottom[0]->shape(2);
   instance_size_ = clip_size_ * batch_size_;
   normalize_ = this->layer_param_.loss_param().normalize();
+
+  // set up bias term
+  float bias_init = this->layer_param_.l_loss_param().bias_init();
+  this->blobs_.resize(1);
+  vector<int> bias_shape(1, 1);
+  this->blobs_[0].reset(new Blob<Dtype>(bias_shape));
+  caffe_gpu_set<Dtype>(1, Dtype(bias_init), this->blobs_[0]->mutable_gpu_data());
 }
 
 template <typename Dtype>

@@ -90,7 +90,7 @@ void MaxMarginAvgSimVideoLossLayer<Dtype>::Forward_gpu(
   //   LOG(INFO) << "video similarity: " << i << " " << S_video_.cpu_data()[i];
   // }
 
-  LOG(INFO) << "bias " << this->blobs_[0]->cpu_data()[0];
+  // LOG(INFO) << "bias " << this->blobs_[0]->cpu_data()[0];
 }
 
 template <typename Dtype>

@@ -4,12 +4,44 @@
 
 namespace caffe {
 
+// Q Loss original
+// template <typename Dtype>
+// __global__ void kernel_q_loss(const int count, const Dtype *data, Dtype* out) {
+//   int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//   if (idx < count) {
+//     out[idx] = fabs( fabs(data[idx]) - 1 );
+//   }
+// }
+
+// template <typename Dtype>
+// __global__ void kernel_backprop(const int count, const Dtype* data, Dtype *out) {
+//   int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//   if (idx < count) {
+//      Dtype sign1 = fabs(data[idx]) - 1 > 0 ? 1 : -1;
+//      Dtype sign2 = fabs(data[idx]) > 0 ? 1 : -1;
+//      out[idx] = sign1 * sign2;
+//   }  
+// }
+
+//Q loss smooth
 template <typename Dtype>
 __global__ void kernel_q_loss(const int count, const Dtype* data, Dtype* out) {
   CUDA_KERNEL_LOOP(index, count) {
-    out[index] = log( cosh( fabs(data[index]) - 1 ) );
+    //out[index] = log( cosh( fabs(data[index]) - 1 ) );
+    out[index] = cosh( fabs(data[index]) - 1 );
   }
 }
+
+template <typename Dtype>
+__global__ void kernel_backprop(const int count, const Dtype* data, Dtype* out) {
+  CUDA_KERNEL_LOOP(index, count) {
+    //Dtype val = tanh( fabs(data[index]) - 1 );
+    Dtype val = sinh( fabs(data[index]) - 1 );
+    if (data[index] < 0) val *= -1;
+    out[index] = val;
+  }
+}
+
 
 template <typename Dtype>
 void QLossLayer<Dtype>::Forward_gpu(
@@ -33,14 +65,6 @@ void QLossLayer<Dtype>::Forward_gpu(
   top[0]->mutable_cpu_data()[0] = loss;
 }
 
-template <typename Dtype>
-__global__ void kernel_backprop(const int count, const Dtype* data, Dtype* out) {
-  CUDA_KERNEL_LOOP(index, count) {
-    Dtype val = tanh( fabs(data[index]) - 1 );
-    if (data[index] < 0) val *= -1;
-    out[index] = val;
-  }
-}
 
 template <typename Dtype>
 void QLossLayer<Dtype>::Backward_gpu(
@@ -59,26 +83,6 @@ void QLossLayer<Dtype>::Backward_gpu(
   }
 }
 
-// Q Loss original
-/*
-template <typename Dtype>
-__global__ void kernel_q_loss(const int count, const Dtype *data, Dtype* out) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < count) {
-    out[idx] = fabs( fabs(data[idx]) - 1 );
-  }
-}
-
-template <typename Dtype>
-__global__ void kernel_backprop(const int count, const Dtype* data, Dtype *out) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < count) {
-     Dtype sign1 = fabs(data[idx]) - 1 > 0 ? 1 : -1;
-     Dtype sign2 = fabs(data[idx]) > 0 ? 1 : -1;
-     out[idx] = sign1 * sign2;
-  }  
-}
-*/
 
 INSTANTIATE_LAYER_GPU_FUNCS(QLossLayer);
 

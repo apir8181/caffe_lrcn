@@ -42,9 +42,10 @@ __global__ void kernel_video_similarity(const Dtype *frame_sim, const Dtype* lab
 
 template <typename Dtype>
 __global__ void kernel_pairwise_loss(const Dtype* video_sim, const Dtype* label_indicator, Dtype* out,
-                                     const int count, const Dtype margin_width) {
+                                     const int count, const Dtype margin_width, const Dtype bias) {
   CUDA_KERNEL_LOOP(i, count) {
-    out[i] = fmax(0, margin_width - label_indicator[i] * video_sim[i]);
+    Dtype pre_loss = margin_width - label_indicator[i] * (video_sim[i] + bias);
+    out[i] = pre_loss > 0 ? pre_loss : 0;
   }
 }
 
@@ -73,9 +74,10 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_gpu(
 
   // calculate pairwise loss
   Dtype* pairwise_loss = pairwise_loss_.mutable_gpu_data();
+  Dtype bias = this->blobs_[0]->cpu_data()[0];
   kernel_pairwise_loss<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
     CAFFE_CUDA_NUM_THREADS>>>(video_sim, indicator_video, pairwise_loss, 
-                              pairwise_loss_.count(), margin_width_);
+                              pairwise_loss_.count(), margin_width_, bias);
 
   // sum pairwise loss
   Dtype loss;
@@ -84,6 +86,8 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Forward_gpu(
     loss /= batch_size_ * batch_size_;
   }
   top[0]->mutable_cpu_data()[0] = loss;
+
+  LOG(INFO) << "bias " << this->blobs_[0]->cpu_data()[0];
 }
 
 template <typename Dtype>
@@ -115,6 +119,18 @@ __global__ void kernel_nearest(const Dtype* frame_sim, const Dtype* label_indica
 }
 
 template <typename Dtype>
+__global__ void kernel_bias_gradient(const Dtype* pairwise_loss, 
+                                     const Dtype* label_indicator, 
+                                     Dtype* out, const int batch_size) {
+  Dtype gradient = 0;
+  for (int i = 0; i < batch_size * batch_size; ++ i) {
+    gradient += pairwise_loss[i] > 0 ? -label_indicator[i] : 0;
+  }
+  out[0] = gradient;
+}
+
+
+template <typename Dtype>
 void MaxMarginMaxSimVideoLossLayer<Dtype>::Backward_gpu(
   const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down, 
   const vector<Blob<Dtype>*>& bottom) {
@@ -137,16 +153,22 @@ void MaxMarginMaxSimVideoLossLayer<Dtype>::Backward_gpu(
                                 pairwise_loss, bottom_data, 
                                 nn_frame,
                                 clip_size_, batch_size_, instance_size_);
-
+    // backprop to bottom
     caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
                           instance_size_, feature_size_, instance_size_,
                           Dtype(1), nn_frame, bottom_data, Dtype(0), bottom_diff);
     caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
                           instance_size_, feature_size_, instance_size_,
                           Dtype(1), nn_frame, bottom_data, Dtype(1), bottom_diff);
+
+    // backprop to bias term
+    Dtype* bias_term = this->blobs_[0]->mutable_gpu_diff();
+    kernel_bias_gradient<Dtype><<<1, 1>>>(pairwise_loss, label_indicator, bias_term, batch_size_);
+
     if (normalize_) {
-      Dtype scale_factor = batch_size_ * batch_size_;
-      caffe_gpu_scal<Dtype>(bottom[0]->count(), 1.0 / scale_factor, bottom_diff);
+      Dtype scale_factor = 1.0 / (batch_size_ * batch_size_);
+      caffe_gpu_scal<Dtype>(bottom[0]->count(), scale_factor, bottom_diff);
+      caffe_gpu_scal<Dtype>(1, scale_factor, bias_term);
     }
   }
 }

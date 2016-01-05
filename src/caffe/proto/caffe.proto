@@ -684,6 +684,7 @@ message VideoDataParameter {
 
 message LLossParameter {
   optional float margin_width = 3 [default = 1]; 
+  optional float bias_init = 4 [default = 0];
 }
 
 message QLossParameter {
