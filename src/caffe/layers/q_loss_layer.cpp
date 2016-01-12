@@ -1,5 +1,5 @@
 
-#include "caffe/q_loss_layers.hpp"
+#include "caffe/q_loss_layer.hpp"
 
 namespace caffe {
   
@@ -7,17 +7,18 @@ template <typename Dtype>
 void QLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   LossLayer<Dtype>::LayerSetUp(bottom, top);
-  normalize_ = this->layer_param_.loss_param().normalize();
-  axis_ = this->layer_param_.q_loss_param().axis();
-  scale_ = this->layer_param_.q_loss_param().scale();
+  margin_width_ = this->layer_param_.q_loss_param().margin_width();
+  lambda_ = this->layer_param_.q_loss_param().lambda();
 }
 
 template <typename Dtype>
 void QLossLayer<Dtype>::Reshape(
   const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  vector<int> shape(0);
-  top[0]->Reshape(shape);
-  temp_.ReshapeLike(*bottom[0]);
+  vector<int> single_shape(0);
+  top[0]->Reshape(single_shape);
+
+  vector<int> shape(1, bottom[0]->count());
+  loss_.Reshape(shape);
 }
 
 template <typename Dtype>

@@ -683,13 +683,13 @@ message VideoDataParameter {
 }
 
 message LLossParameter {
-  optional float margin_width = 3 [default = 1]; 
-  optional float bias_init = 4 [default = 0];
+  optional float margin_width = 1 [default = 1]; 
+  optional float bias_init = 2 [default = 0];
 }
 
 message QLossParameter {
-  optional uint32 axis = 1 [default = 1];
-  optional float scale = 2 [default = 1];
+  optional float lambda = 1;
+  optional float margin_width = 2 [default = 0.5]; 
 }
 
 message InfogainLossParameter {

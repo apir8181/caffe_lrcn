@@ -1,5 +1,5 @@
 
-#include "caffe/l_loss_layers.hpp"
+#include "caffe/l_loss_avg_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
 namespace caffe {
@@ -35,16 +35,28 @@ __global__ void kernel_pairwise_loss(const Dtype* S_video, const Dtype* I_video,
                                      const int count, const Dtype margin_width, const Dtype bias) {
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   if (id < count) {
-    Dtype pre_loss = margin_width - I_video[id] * (S_video[id] + bias);
+    Dtype pre_loss = margin_width - I_video[id] * S_video[id];
     out[id] = pre_loss > 0 ? pre_loss : 0;
   }
 }    
 
+
 template <typename Dtype>
-void MaxMarginAvgSimVideoLossLayer<Dtype>::Forward_gpu(
+__global__ void kernel_accuracy(
+  const Dtype* pairwise_loss, Dtype* out, const int count) {
+
+  CUDA_KERNEL_LOOP(i, count) {
+    out[i] = pairwise_loss[i] > 0 ? 0 : 1;
+  }
+
+}
+
+template <typename Dtype>
+void LLossAVGLayer<Dtype>::Forward_gpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   const Dtype* bottom_data = bottom[0]->gpu_data();
   const Dtype* bottom_label = bottom[1]->gpu_data();
+
 
   // calculate video centroid
   Dtype* video_centroid = video_centroid_.mutable_gpu_data();
@@ -52,23 +64,26 @@ void MaxMarginAvgSimVideoLossLayer<Dtype>::Forward_gpu(
     CAFFE_CUDA_NUM_THREADS>>>(bottom_data, video_centroid,
                               clip_size_, batch_size_, feature_size_);
   
+
   // calculate video pair similarity
   Dtype* video_sim = S_video_.mutable_gpu_data();
   caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasTrans,
                         batch_size_, batch_size_, feature_size_,
                         Dtype(1), video_centroid, video_centroid, Dtype(0), video_sim);
 
+
   // calculate video label indicator
   Dtype* indicator_video = I_video_.mutable_gpu_data();
   kernel_label_indicator<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
     CAFFE_CUDA_NUM_THREADS>>>(bottom_label, indicator_video, batch_size_);
 
+
   // calculate pairwise loss
   Dtype* pairwise_loss = pairwise_loss_.mutable_gpu_data();
-  Dtype bias = this->blobs_[0]->cpu_data()[0];
   kernel_pairwise_loss<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
     CAFFE_CUDA_NUM_THREADS>>>(video_sim, indicator_video, pairwise_loss, 
-                              pairwise_loss_.count(), margin_width_, bias);
+                              pairwise_loss_.count(), margin_width_, 0);
+
 
   // sum pairwise loss
   Dtype loss;
@@ -78,19 +93,25 @@ void MaxMarginAvgSimVideoLossLayer<Dtype>::Forward_gpu(
   }
   top[0]->mutable_cpu_data()[0] = loss;
 
+  // accuracy
+  Dtype* accuracy = accuracy_.mutable_gpu_data();
+  kernel_accuracy<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
+    CAFFE_CUDA_NUM_THREADS>>>(pairwise_loss, accuracy, batch_size_ * batch_size_);
+  Dtype ac;
+  caffe_gpu_asum<Dtype>(accuracy_.count(), accuracy, &ac);
+  ac /= batch_size_ * batch_size_;
+  LOG(INFO) << "accuracy:" << ac;
+
   // for (int i = 0; i < bottom[1]->count(); ++ i) {
   //   LOG(INFO) << "label: " << i << " " << bottom[1]->cpu_data()[i];
   // }
-
   // for (int i = 0; i < I_video_.count(); ++ i) {
   //   LOG(INFO) << "video label similarity: " << i << " " << I_video_.cpu_data()[i];
   // }
-
   // for (int i = 0; i < S_video_.count(); ++ i) {
   //   LOG(INFO) << "video similarity: " << i << " " << S_video_.cpu_data()[i];
   // }
-
-  // LOG(INFO) << "bias " << this->blobs_[0]->cpu_data()[0];
+  //LOG(INFO) << "bias " << this->blobs_[0]->cpu_data()[0];
 }
 
 template <typename Dtype>
@@ -123,7 +144,7 @@ __global__ void kernel_bias_gradient(const Dtype* pairwise_loss,
 }
 
 template <typename Dtype>
-void MaxMarginAvgSimVideoLossLayer<Dtype>::Backward_gpu(
+void LLossAVGLayer<Dtype>::Backward_gpu(
   const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down, 
   const vector<Blob<Dtype>*>& bottom) {
   if (propagate_down[1]) {
@@ -134,25 +155,35 @@ void MaxMarginAvgSimVideoLossLayer<Dtype>::Backward_gpu(
     const Dtype* pairwise_loss = pairwise_loss_.gpu_data();
     const Dtype* I_video = I_video_.gpu_data();
     const Dtype* video_centroid = video_centroid_.gpu_data();
+    const Dtype* bottom_data = bottom[0]->gpu_data();
+    const int bottom_count = bottom[0]->count();
+    Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
 
     // backprop residue to bottom
-    Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
     caffe_gpu_set<Dtype>(bottom[0]->count(), Dtype(0), bottom_diff);
     kernel_backprop<Dtype><<<CAFFE_GET_BLOCKS(clip_size_ * batch_size_),
       CAFFE_CUDA_NUM_THREADS>>>(pairwise_loss, I_video, video_centroid, bottom_diff, 
                                 clip_size_, batch_size_, feature_size_);
 
     // backprop to bias term
-    Dtype* bias_term = this->blobs_[0]->mutable_gpu_diff();
-    kernel_bias_gradient<Dtype><<<1, 1>>>(pairwise_loss, I_video, bias_term, batch_size_);
+    //Dtype* bias_term = this->blobs_[0]->mutable_gpu_diff();
+    //kernel_bias_gradient<Dtype><<<1, 1>>>(pairwise_loss, I_video, bias_term, batch_size_);
 
-    if (normalize_) {
-      Dtype scale_factor = 1.0 / (batch_size_ * batch_size_);
-      caffe_gpu_scal<Dtype>(bottom[0]->count(), scale_factor, bottom_diff);
-      caffe_gpu_scal<Dtype>(1, scale_factor, bias_term);
-    } 
+    // if (normalize_) {
+    //    Dtype scale_factor = 1.0 / (batch_size_ * batch_size_);
+    //    caffe_gpu_scal<Dtype>(bottom[0]->count(), scale_factor, bottom_diff);
+    //   caffe_gpu_scal<Dtype>(1, scale_factor, bias_term);
+    //} 
+
+    Dtype bottom_diff_som, bottom_data_som;
+    caffe_gpu_asum<Dtype>(bottom_count, bottom_data, &bottom_data_som);
+    caffe_gpu_asum<Dtype>(bottom_count, bottom_diff, &bottom_diff_som);
+    bottom_data_som /= bottom_count;
+    bottom_diff_som /= bottom_count;
+    LOG(INFO) << "bottom data SOM:" << bottom_data_som;
+    LOG(INFO) << "bottom diff SOM:" << bottom_diff_som;
   }
 }
 
-INSTANTIATE_LAYER_GPU_FUNCS(MaxMarginAvgSimVideoLossLayer);
+INSTANTIATE_LAYER_GPU_FUNCS(LLossAVGLayer);
 } // namespace caffe
