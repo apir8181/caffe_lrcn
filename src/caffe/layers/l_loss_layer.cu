@@ -49,8 +49,8 @@ __global__ void kernel_label_indicator(
      Dtype val = 0;
      Dtype weight = L_frame[i] * L_frame[j];
      for (int d = 0; d < feature_size; ++ d) {
-       val += data[i*feature_size + d] * data[j*feature_size + d] / weight;
-       //val += data[i*feature_size + d] * data[j*feature_size + d];
+       //val += data[i*feature_size + d] * data[j*feature_size + d] / weight;
+       val += data[i*feature_size + d] * data[j*feature_size + d];
      }
      out[ij] = val;
    }
@@ -84,9 +84,9 @@ __global__ void kernel_pairwise_loss(
 
   CUDA_KERNEL_LOOP(ij, batch_size * batch_size) {
     int i = ij / batch_size, j = ij % batch_size;
-    Dtype pre_loss = margin_width - I_video[ij] * (S_video[ij] + bias[0]);
-    //Dtype pre_loss = margin_width - I_video[ij] * S_video[ij];
-    out[ij] = pre_loss > LLOSS_ZERO ? pre_loss * pre_loss : 0;
+    //Dtype pre_loss = margin_width - I_video[ij] * (S_video[ij] + bias[0]);
+    Dtype pre_loss = margin_width - I_video[ij] * S_video[ij];
+    out[ij] = pre_loss > LLOSS_ZERO ? pre_loss: 0;
   }
 
 }
@@ -130,10 +130,10 @@ void LLossLayer<Dtype>::Forward_gpu(
                               clip_size_, batch_size_, instance_size_);
 
   // calculate pairwise loss
-  Dtype* bias = this->blobs_[0]->mutable_gpu_data();
+  //Dtype* bias = this->blobs_[0]->mutable_gpu_data();
   Dtype* pairwise_loss = pairwise_loss_.mutable_gpu_data();
   kernel_pairwise_loss<Dtype><<<CAFFE_GET_BLOCKS(batch_size_ * batch_size_),
-    CAFFE_CUDA_NUM_THREADS>>>(S_video, I_video, bias, pairwise_loss, 
+    CAFFE_CUDA_NUM_THREADS>>>(S_video, I_video, 0, pairwise_loss, 
                               batch_size_, margin_width_);
 
   Dtype* accuracy = accuracy_.mutable_gpu_data();
@@ -143,13 +143,13 @@ void LLossLayer<Dtype>::Forward_gpu(
   // sum pairwise loss
   Dtype loss;
   caffe_gpu_asum<Dtype>(pairwise_loss_.count(), pairwise_loss, &loss);
-  top[0]->mutable_cpu_data()[0] = loss;
+  top[0]->mutable_cpu_data()[0] = loss / (batch_size_ * batch_size_);
 
   // classifier accuracy
-  Dtype ac;
-  caffe_gpu_asum<Dtype>(accuracy_.count(), accuracy, &ac);
-  ac /= batch_size_ * batch_size_;
-  LOG(INFO) << "accuracy:" << ac;
+  // Dtype ac;
+  // caffe_gpu_asum<Dtype>(accuracy_.count(), accuracy, &ac);
+  // ac /= batch_size_ * batch_size_;
+  // LOG(INFO) << "accuracy:" << ac;
 
   // for (int i = 0; i < S_frame_.count(); ++ i)
   //    LOG(INFO) << "frame similarity: " << i << " " << S_frame_.cpu_data()[i];
@@ -159,13 +159,12 @@ void LLossLayer<Dtype>::Forward_gpu(
   //   LOG(INFO) << "video label : " << i << " " << I_video_.cpu_data()[i];
   // for (int i = 0; i < S_video_.count(); ++ i)
   //    LOG(INFO) << "video sim : " << i << " " << S_video_.cpu_data()[i];
-  // for (int i = 0; i < pairwise_loss_.count(); ++ i)
-  //   LOG(INFO) << i << " video_sim:" << S_video_.cpu_data()[i] 
-  //             << " point score:" 
-  //             << (this->blobs_[0]->mutable_cpu_data()[0] + 
-  //                 S_video_.cpu_data()[i]) * I_video_.cpu_data()[i]
-  //             << " loss:" << pairwise_loss_.cpu_data()[i];
-  LOG(INFO) << "bias " << this->blobs_[0]->mutable_cpu_data()[0];
+  for (int i = 0; i < pairwise_loss_.count(); ++ i)
+    LOG(INFO) << i << " video_sim:" << S_video_.cpu_data()[i]
+              << " label:" << I_video_.cpu_data()[i]
+              << " point score:" << S_video_.cpu_data()[i] * I_video_.cpu_data()[i]
+              << " loss:" << pairwise_loss_.cpu_data()[i];
+  //LOG(INFO) << "bias " << this->blobs_[0]->mutable_cpu_data()[0];
 }
 
 
@@ -189,12 +188,12 @@ __global__ void kernel_backprop(
         int thjd = thj*feature_size + d;
         int tithj = ti*instance_size + thj;
         //if (pairwise_loss[ij] <= LLOSS_ZERO) continue;
-        Dtype weight = -2.0 * pairwise_loss[ij] * I_video[ij] / clip_size / clip_size;
-        Dtype l_part = data[thjd] / L_frame[ti] / L_frame[thj];
-        Dtype r_part = data[tid] * S_frame[tithj] / L_frame[ti] / L_frame[ti];
-        val += weight * (l_part - r_part);
-        // Dtype weight = -2.0 * I_video[ij] / clip_size / clip_size;
-        // val += weight * data[thjd];
+        //Dtype weight = -2.0 * I_video[ij] / clip_size / clip_size;
+        //Dtype l_part = data[thjd] / L_frame[ti] / L_frame[thj];
+        //Dtype r_part = data[tid] * S_frame[tithj] / L_frame[ti] / L_frame[ti];
+        //val += weight * (l_part - r_part);
+        Dtype weight = -2.0 * I_video[ij] / clip_size / clip_size;
+        val += weight * data[thjd];
       }
 
     out[tid] = val;
@@ -210,7 +209,7 @@ __global__ void kernel_bias_backprop(
   CUDA_KERNEL_LOOP(j, 1) {
     Dtype val = 0;
     for (int i = 0; i < count; ++ i) {
-      val += -I_label[i] * pairwise_loss[i] : 0;
+      val += pairwise_loss[i] > 0 ? -I_label[i] : 0;
     }
     bias_diff[0] = val;
   }
@@ -243,15 +242,15 @@ void LLossLayer<Dtype>::Backward_gpu(
                                 instance_size_, feature_size_);
 
     // // backprop to bias
-    Dtype* bias_diff = this->blobs_[0]->mutable_gpu_diff();
-    kernel_bias_backprop<Dtype><<<CAFFE_GET_BLOCKS(1),
-        CAFFE_CUDA_NUM_THREADS>>>(pairwise_loss, I_video, 
-                                  bias_diff, batch_size_ * batch_size_);
+    // Dtype* bias_diff = this->blobs_[0]->mutable_gpu_diff();
+    // kernel_bias_backprop<Dtype><<<CAFFE_GET_BLOCKS(1),
+    //     CAFFE_CUDA_NUM_THREADS>>>(pairwise_loss, I_video, 
+    //                               bias_diff, batch_size_ * batch_size_);
 
     if (normalize_) {
-       Dtype scale_factor = 1.0 / (batch_size_ * batch_size_);
-       caffe_gpu_scal<Dtype>(bottom[0]->count(), scale_factor, bottom_diff);
-       caffe_gpu_scal<Dtype>(1, scale_factor, bias_diff);
+         Dtype scale_factor = 1.0 / (batch_size_ * batch_size_);
+         caffe_gpu_scal<Dtype>(bottom[0]->count(), scale_factor, bottom_diff);
+    //     caffe_gpu_scal<Dtype>(1, scale_factor, bias_diff);
     }
 
     Dtype bottom_diff_som, bottom_data_som;
@@ -261,7 +260,7 @@ void LLossLayer<Dtype>::Backward_gpu(
     bottom_diff_som /= bottom_count;
     LOG(INFO) << "bottom data SOM:" << bottom_data_som;
     LOG(INFO) << "bottom diff SOM:" << bottom_diff_som;
-    LOG(INFO) << "bias diff:" << this->blobs_[0]->mutable_cpu_diff()[0];
+    //LOG(INFO) << "bias diff:" << this->blobs_[0]->mutable_cpu_diff()[0];
   }
 }
 

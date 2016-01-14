@@ -13,7 +13,7 @@ void LLossAVGLayer<Dtype>::LayerSetUp(
   CHECK_EQ(bottom[0]->shape(1), bottom[1]->shape(1))
     << "data & data label should have equal shape.";
 
-  margin_width_ = this->layer_param_.l_loss_param().margin_width();
+  //margin_width_ = this->layer_param_.l_loss_param().margin_width();
   normalize_ = this->layer_param_.loss_param().normalize();
 
   // set up bias term
@@ -33,16 +33,21 @@ void LLossAVGLayer<Dtype>::Reshape(
   batch_size_ = bottom[0]->shape(1);
   feature_size_ = bottom[0]->shape(2);
 
-  vector<int> video_pair_shape(2, batch_size_);
-  S_video_.Reshape(video_pair_shape);
-  I_video_.Reshape(video_pair_shape);
-  pairwise_loss_.Reshape(video_pair_shape);
-  accuracy_.Reshape(video_pair_shape);
-
   vector<int> centroid_shape;
   centroid_shape.push_back(batch_size_);
   centroid_shape.push_back(feature_size_);
   video_centroid_.Reshape(centroid_shape);
+  centroid_diff_.Reshape(centroid_shape);
+
+  vector<int> length_shape(1, batch_size_);
+  centroid_length_.Reshape(length_shape);
+
+  vector<int> video_pair_shape(2, batch_size_);
+  S_video_.Reshape(video_pair_shape);
+  I_video_.Reshape(video_pair_shape);
+  pairwise_error_.Reshape(video_pair_shape);
+  pairwise_loss_.Reshape(video_pair_shape);
+
 }
 
 template <typename Dtype>

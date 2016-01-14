@@ -34,14 +34,15 @@ protected:
                             const vector<Blob<Dtype>*>& bottom);
 
 private:
-  int clip_size_, batch_size_, instance_size_, feature_size_;
+  int clip_size_, batch_size_, feature_size_;
   bool normalize_;
-  Dtype margin_width_;
+  Blob<Dtype> video_centroid_;
+  Blob<Dtype> centroid_diff_;
+  Blob<Dtype> centroid_length_;
   Blob<Dtype> S_video_; // per video similarity for @f$ (i, j) @f$
   Blob<Dtype> I_video_; // per video label sim indicators
-  Blob<Dtype> video_centroid_;
+  Blob<Dtype> pairwise_error_;
   Blob<Dtype> pairwise_loss_;
-  Blob<Dtype> accuracy_;
 };
   
 } // namespace caffe
