@@ -1,11 +1,12 @@
 
 #include "caffe/l_loss_outer_cosine_layer.hpp"
 #include "caffe/util/math_functions.hpp"
+#include <stdio.h>
 
 namespace caffe {
 
 template <typename Dtype>
-__global__ void kernel_frame_length(
+__global__ void kernel_frame_length_cosine(
   const Dtype* data, Dtype* out, 
   const int instance_size, const int feature_size) {
 
@@ -22,7 +23,7 @@ __global__ void kernel_frame_length(
 
 
 template <typename Dtype>
-__global__ void kernel_frame_similarity(
+__global__ void kernel_frame_similarity_cosine(
   const Dtype* data, const Dtype* data_length, Dtype* out, 
   const int instance_size, const int feature_size) {
   
@@ -40,7 +41,7 @@ __global__ void kernel_frame_similarity(
 
 
 template <typename Dtype>
-__global__ void kernel_frame_indicator(
+__global__ void kernel_frame_indicator_cosine(
   const Dtype* label, Dtype* out, const int instance_size) {
   
   CUDA_KERNEL_LOOP(ij, instance_size * instance_size) {
@@ -54,7 +55,7 @@ __global__ void kernel_frame_indicator(
 
 
 template <typename Dtype>
-__global__ void kernel_pairwise_error(
+__global__ void kernel_pairwise_error_cosine(
     const Dtype* S_frame, const Dtype* I_frame,
     Dtype* out, const int count) {
 
@@ -67,7 +68,7 @@ __global__ void kernel_pairwise_error(
 
 
 template <typename Dtype>
-__global__ void kernel_pairwise_loss(
+__global__ void kernel_pairwise_loss_cosine(
     const Dtype* S_frame, const Dtype* I_frame,
     Dtype* out, const int count) {
 
@@ -91,23 +92,23 @@ void LLossOuterCosineLayer<Dtype>::Forward_gpu(
   Dtype* pairwise_loss = pairwise_loss_.mutable_gpu_data();
   int pair_size = instance_size_ * instance_size_;
 
-  kernel_frame_length<Dtype><<<CAFFE_GET_BLOCKS(instance_size_),
+  kernel_frame_length_cosine<Dtype><<<CAFFE_GET_BLOCKS(instance_size_),
     CAFFE_CUDA_NUM_THREADS>>>(bottom_data, L_frame, instance_size_, feature_size_);
 
   // calculate video pair similarity
-  kernel_frame_similarity<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
+  kernel_frame_similarity_cosine<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
     CAFFE_CUDA_NUM_THREADS>>>(bottom_data, L_frame, S_frame, 
                               instance_size_, feature_size_);
 
   // calculate video label indicator
-  kernel_frame_indicator<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
+  kernel_frame_indicator_cosine<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
     CAFFE_CUDA_NUM_THREADS>>>(bottom_label, I_frame, instance_size_);
 
   // calculate pairwise error
-  kernel_pairwise_error<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
+  kernel_pairwise_error_cosine<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
     CAFFE_CUDA_NUM_THREADS>>>(S_frame, I_frame, pairwise_error, pair_size);
                               
-  kernel_pairwise_loss<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
+  kernel_pairwise_loss_cosine<Dtype><<<CAFFE_GET_BLOCKS(pair_size),
     CAFFE_CUDA_NUM_THREADS>>>(S_frame, I_frame, pairwise_loss, pair_size);
 
   Dtype loss, abs_error;
@@ -122,16 +123,16 @@ void LLossOuterCosineLayer<Dtype>::Forward_gpu(
 
   top[0]->mutable_cpu_data()[0] = loss;
 
-  // for (int i = 0; i < batch_size_ * batch_size_; ++ i) {
+  // for (int i = 0; i < pair_size; ++ i) {
   //   LOG(INFO) << " ij:" << i
   //             << " loss:" << pairwise_loss_.mutable_cpu_data()[i]
-  //             << " label:" << I_video_.mutable_cpu_data()[i]
-  //             << " sim:" << S_video_.mutable_cpu_data()[i];
+  //             << " label:" << I_frame_.mutable_cpu_data()[i]
+  //             << " sim:" << S_frame_.mutable_cpu_data()[i];
   // }
 }
 
 template <typename Dtype>
-__global__ void kernel_backprop(
+__global__ void kernel_backprop_cosine(
   const Dtype* pairwise_error, const Dtype* data, 
   const Dtype* data_length, const Dtype* S_frame, Dtype* out,
   const int instance_size, int feature_size) {
@@ -168,7 +169,7 @@ void LLossOuterCosineLayer<Dtype>::Backward_gpu(
     const Dtype* S_frame = S_frame_.gpu_data();
     Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
 
-    kernel_backprop<Dtype><<<CAFFE_GET_BLOCKS(instance_size_ * feature_size_),
+    kernel_backprop_cosine<Dtype><<<CAFFE_GET_BLOCKS(instance_size_ * feature_size_),
       CAFFE_CUDA_NUM_THREADS>>>(pairwise_error, bottom_data, 
                                 data_length, S_frame, bottom_diff,
                                 instance_size_, feature_size_);

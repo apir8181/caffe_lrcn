@@ -8,12 +8,13 @@ namespace caffe {
 //Q loss margin
 template <typename Dtype>
 __global__ void kernel_q_loss(
-  const Dtype* data, Dtype* out, 
-  const int count, const float margin) {
+  const Dtype* data, Dtype* out, const Dtype margin, const int count) {
 
   CUDA_KERNEL_LOOP(i, count) {
+    //Dtype pre_loss = log( cosh( fabs(data[i]) - 1 ) );
+    //out[i] = pre_loss;
     Dtype pre_loss = margin - fabs(data[i]);
-    out[i] = (pre_loss > 0) ? pre_loss : 0;
+    out[i] = pre_loss > 0 ? pre_loss : 0;
   }
 
 }
@@ -23,6 +24,8 @@ __global__ void kernel_q_backprop(
   const Dtype* loss, const Dtype* data, Dtype* out, const int count) {
 
   CUDA_KERNEL_LOOP(i, count) {
+    //Dtype sign = data[i] > 0 ? 1 : -1;
+    //out[i] = tanh( fabs(data[i]) - 1 ) * sign;
     Dtype sign = data[i] > 0 ? 1 : -1;
     out[i] = loss[i] > 0 ? -sign : 0; 
   }
@@ -37,8 +40,7 @@ void QLossLayer<Dtype>::Forward_gpu(
   const Dtype* bottom_data = bottom[0]->gpu_data();
   Dtype* bitwise_loss = loss_.mutable_gpu_data();
   kernel_q_loss<Dtype><<<CAFFE_GET_BLOCKS(bottom_data_count),
-    CAFFE_CUDA_NUM_THREADS>>>(bottom_data, bitwise_loss, 
-                              bottom_data_count, margin_width_);
+    CAFFE_CUDA_NUM_THREADS>>>(bottom_data, bitwise_loss, margin_width_, bottom_data_count);
 
   Dtype loss;
   caffe_gpu_asum<Dtype>(bottom_data_count, bitwise_loss, &loss);
